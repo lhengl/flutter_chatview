@@ -144,6 +144,7 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
   Widget build(BuildContext context) {
     final suggestionsListConfig =
         suggestionsConfig?.listConfig ?? const SuggestionListConfig();
+    DateTime lastMatchedDate = DateTime.now();
     return GestureDetector(
       onHorizontalDragUpdate: (details) => isEnableSwipeToSeeTime && !showPopUp
           ? _onHorizontalDrag(details)
@@ -152,49 +153,126 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
           ? _animationController?.reverse()
           : null,
       onTap: widget.onChatListTap,
-      child: CustomScrollView(
-        reverse: true,
-        // When reaction popup is being appeared at that user should not scroll.
-        physics: showPopUp ? const NeverScrollableScrollPhysics() : null,
-        controller: widget.scrollController,
-        slivers: [
-          // Adds bottom space to the message list, ensuring it is displayed
-          // above the message text field.
-          SliverToBoxAdapter(
-            child: SizedBox(
-              height: chatTextFieldHeight,
-            ),
-          ),
-          if (chatController != null)
-            SliverToBoxAdapter(
-              child: Align(
-                alignment: suggestionsListConfig.axisAlignment.alignment,
-                child: const SuggestionList(),
-              ),
-            ),
-          if (chatController != null)
-            SliverToBoxAdapter(
-              child: ValueListenableBuilder(
-                valueListenable: chatController!.typingIndicatorNotifier,
-                builder: (context, value, child) => TypingIndicator(
-                  typeIndicatorConfig: chatListConfig.typeIndicatorConfig,
-                  chatBubbleConfig:
-                      chatListConfig.chatBubbleConfig?.inComingChatBubbleConfig,
-                  showIndicator: value,
+      child: StreamBuilder<List<Message>>(
+        stream: chatController?.messageStreamController.stream,
+        builder: (context, snapshot) {
+          if (!snapshot.connectionState.isActive) {
+            return Center(
+              child: chatBackgroundConfig.loadingWidget ??
+                  const CircularProgressIndicator(),
+            );
+          } else {
+            final messages = (chatBackgroundConfig.sortEnable
+                    ? sortMessage(snapshot.data!)
+                    : snapshot.data!)
+                .reversed
+                .toList();
+
+            final enableSeparator =
+                featureActiveConfig?.enableChatSeparator ?? false;
+
+            Map<int, DateTime> messageSeparator = {};
+
+            if (enableSeparator) {
+              /// Get separator when date differ for two messages
+              (messageSeparator, lastMatchedDate) = _getMessageSeparator(
+                messages,
+                lastMatchedDate,
+              );
+            }
+
+            /// [count] that indicates how many separators
+            /// needs to be display in chat
+            var count = 0;
+
+            return CustomScrollView(
+              reverse: true,
+              // When reaction popup is being appeared at that user should not scroll.
+              physics: showPopUp ? const NeverScrollableScrollPhysics() : null,
+              controller: widget.scrollController,
+              slivers: [
+                // Adds bottom space to the message list, ensuring it is displayed
+                // above the message text field.
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: chatTextFieldHeight,
+                  ),
                 ),
-              ),
-            ),
-          SliverToBoxAdapter(
-            child: _animationController != null
-                ? AnimatedBuilder(
-                    animation: _animationController!,
-                    builder: (context, child) {
-                      return _chatStreamBuilder;
+                if (chatController != null)
+                  SliverToBoxAdapter(
+                    child: Align(
+                      alignment: suggestionsListConfig.axisAlignment.alignment,
+                      child: const SuggestionList(),
+                    ),
+                  ),
+                if (chatController != null)
+                  SliverToBoxAdapter(
+                    child: ValueListenableBuilder(
+                      valueListenable: chatController!.typingIndicatorNotifier,
+                      builder: (context, value, child) => TypingIndicator(
+                        typeIndicatorConfig: chatListConfig.typeIndicatorConfig,
+                        chatBubbleConfig: chatListConfig
+                            .chatBubbleConfig?.inComingChatBubbleConfig,
+                        showIndicator: value,
+                      ),
+                    ),
+                  ),
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      /// By removing [count] from [index] will get actual index
+                      /// to display message in chat
+                      var newIndex = index - count;
+
+                      /// Check [messageSeparator] contains group separator for [index]
+                      if (enableSeparator &&
+                          messageSeparator.containsKey(index)) {
+                        /// Increase counter each time
+                        /// after separating messages with separator
+                        count++;
+                        return _groupSeparator(
+                          messageSeparator[index]!,
+                        );
+                      }
+
+                      return ValueListenableBuilder<String?>(
+                        valueListenable: _replyId,
+                        builder: (context, state, child) {
+                          final message = messages[newIndex];
+                          final enableScrollToRepliedMsg = chatListConfig
+                                  .repliedMessageConfig
+                                  ?.repliedMsgAutoScrollConfig
+                                  .enableScrollToRepliedMsg ??
+                              false;
+                          return ChatBubbleWidget(
+                            key: message.key,
+                            message: message,
+                            slideAnimation: _slideAnimation,
+                            onLongPress: (yCoordinate, xCoordinate) =>
+                                widget.onChatBubbleLongPress(
+                              yCoordinate,
+                              xCoordinate,
+                              message,
+                            ),
+                            onSwipe: widget.assignReplyMessage,
+                            shouldHighlight: state == message.id,
+                            onReplyTap: enableScrollToRepliedMsg
+                                ? (replyId) =>
+                                    _onReplyTap(replyId, snapshot.data)
+                                : null,
+                          );
+                        },
+                      );
                     },
-                  )
-                : _chatStreamBuilder,
-          ),
-        ],
+                    childCount: (enableSeparator
+                        ? messages.length + messageSeparator.length
+                        : messages.length),
+                  ),
+                ),
+              ],
+            );
+          }
+        },
       ),
     );
   }
@@ -248,95 +326,6 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
     _animationController?.dispose();
     _replyId.dispose();
     super.dispose();
-  }
-
-  Widget get _chatStreamBuilder {
-    DateTime lastMatchedDate = DateTime.now();
-    return StreamBuilder<List<Message>>(
-      stream: chatController?.messageStreamController.stream,
-      builder: (context, snapshot) {
-        if (!snapshot.connectionState.isActive) {
-          return Center(
-            child: chatBackgroundConfig.loadingWidget ??
-                const CircularProgressIndicator(),
-          );
-        } else {
-          final messages = chatBackgroundConfig.sortEnable
-              ? sortMessage(snapshot.data!)
-              : snapshot.data!;
-
-          final enableSeparator =
-              featureActiveConfig?.enableChatSeparator ?? false;
-
-          Map<int, DateTime> messageSeparator = {};
-
-          if (enableSeparator) {
-            /// Get separator when date differ for two messages
-            (messageSeparator, lastMatchedDate) = _getMessageSeparator(
-              messages,
-              lastMatchedDate,
-            );
-          }
-
-          /// [count] that indicates how many separators
-          /// needs to be display in chat
-          var count = 0;
-
-          return ListView.builder(
-            key: widget.key,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
-            shrinkWrap: true,
-            itemCount: (enableSeparator
-                ? messages.length + messageSeparator.length
-                : messages.length),
-            itemBuilder: (context, index) {
-              /// By removing [count] from [index] will get actual index
-              /// to display message in chat
-              var newIndex = index - count;
-
-              /// Check [messageSeparator] contains group separator for [index]
-              if (enableSeparator && messageSeparator.containsKey(index)) {
-                /// Increase counter each time
-                /// after separating messages with separator
-                count++;
-                return _groupSeparator(
-                  messageSeparator[index]!,
-                );
-              }
-
-              return ValueListenableBuilder<String?>(
-                valueListenable: _replyId,
-                builder: (context, state, child) {
-                  final message = messages[newIndex];
-                  final enableScrollToRepliedMsg = chatListConfig
-                          .repliedMessageConfig
-                          ?.repliedMsgAutoScrollConfig
-                          .enableScrollToRepliedMsg ??
-                      false;
-                  return ChatBubbleWidget(
-                    key: message.key,
-                    message: message,
-                    slideAnimation: _slideAnimation,
-                    onLongPress: (yCoordinate, xCoordinate) =>
-                        widget.onChatBubbleLongPress(
-                      yCoordinate,
-                      xCoordinate,
-                      message,
-                    ),
-                    onSwipe: widget.assignReplyMessage,
-                    shouldHighlight: state == message.id,
-                    onReplyTap: enableScrollToRepliedMsg
-                        ? (replyId) => _onReplyTap(replyId, snapshot.data)
-                        : null,
-                  );
-                },
-              );
-            },
-          );
-        }
-      },
-    );
   }
 
   List<Message> sortMessage(List<Message> messages) {
