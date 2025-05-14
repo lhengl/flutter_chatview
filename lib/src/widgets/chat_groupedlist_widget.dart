@@ -144,49 +144,47 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
   Widget build(BuildContext context) {
     final suggestionsListConfig =
         suggestionsConfig?.listConfig ?? const SuggestionListConfig();
-    return CustomScrollView(
-      reverse: true,
-      // When reaction popup is being appeared at that user should not scroll.
-      physics: showPopUp ? const NeverScrollableScrollPhysics() : null,
-      controller: widget.scrollController,
-      slivers: [
-        // Adds bottom space to the message list, ensuring it is displayed
-        // above the message text field.
-        SliverToBoxAdapter(
-          child: SizedBox(
-            height: chatTextFieldHeight,
-          ),
-        ),
-        if (chatController != null)
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) => isEnableSwipeToSeeTime && !showPopUp
+          ? _onHorizontalDrag(details)
+          : null,
+      onHorizontalDragEnd: (details) => isEnableSwipeToSeeTime && !showPopUp
+          ? _animationController?.reverse()
+          : null,
+      onTap: widget.onChatListTap,
+      child: CustomScrollView(
+        reverse: true,
+        // When reaction popup is being appeared at that user should not scroll.
+        physics: showPopUp ? const NeverScrollableScrollPhysics() : null,
+        controller: widget.scrollController,
+        slivers: [
+          // Adds bottom space to the message list, ensuring it is displayed
+          // above the message text field.
           SliverToBoxAdapter(
-            child: Align(
-              alignment: suggestionsListConfig.axisAlignment.alignment,
-              child: const SuggestionList(),
+            child: SizedBox(
+              height: chatTextFieldHeight,
             ),
           ),
-        if (chatController != null)
-          SliverToBoxAdapter(
-            child: ValueListenableBuilder(
-              valueListenable: chatController!.typingIndicatorNotifier,
-              builder: (context, value, child) => TypingIndicator(
-                typeIndicatorConfig: chatListConfig.typeIndicatorConfig,
-                chatBubbleConfig:
-                    chatListConfig.chatBubbleConfig?.inComingChatBubbleConfig,
-                showIndicator: value,
+          if (chatController != null)
+            SliverToBoxAdapter(
+              child: Align(
+                alignment: suggestionsListConfig.axisAlignment.alignment,
+                child: const SuggestionList(),
               ),
             ),
-          ),
-        SliverToBoxAdapter(
-          child: GestureDetector(
-            onHorizontalDragUpdate: (details) =>
-                isEnableSwipeToSeeTime && !showPopUp
-                    ? _onHorizontalDrag(details)
-                    : null,
-            onHorizontalDragEnd: (details) =>
-                isEnableSwipeToSeeTime && !showPopUp
-                    ? _animationController?.reverse()
-                    : null,
-            onTap: widget.onChatListTap,
+          if (chatController != null)
+            SliverToBoxAdapter(
+              child: ValueListenableBuilder(
+                valueListenable: chatController!.typingIndicatorNotifier,
+                builder: (context, value, child) => TypingIndicator(
+                  typeIndicatorConfig: chatListConfig.typeIndicatorConfig,
+                  chatBubbleConfig:
+                      chatListConfig.chatBubbleConfig?.inComingChatBubbleConfig,
+                  showIndicator: value,
+                ),
+              ),
+            ),
+          SliverToBoxAdapter(
             child: _animationController != null
                 ? AnimatedBuilder(
                     animation: _animationController!,
@@ -196,8 +194,8 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
                   )
                 : _chatStreamBuilder,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
