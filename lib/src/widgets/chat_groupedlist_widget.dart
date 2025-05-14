@@ -150,6 +150,32 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
       physics: showPopUp ? const NeverScrollableScrollPhysics() : null,
       controller: widget.scrollController,
       slivers: [
+        // Adds bottom space to the message list, ensuring it is displayed
+        // above the message text field.
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: chatTextFieldHeight,
+          ),
+        ),
+        if (chatController != null)
+          SliverToBoxAdapter(
+            child: Align(
+              alignment: suggestionsListConfig.axisAlignment.alignment,
+              child: const SuggestionList(),
+            ),
+          ),
+        if (chatController != null)
+          SliverToBoxAdapter(
+            child: ValueListenableBuilder(
+              valueListenable: chatController!.typingIndicatorNotifier,
+              builder: (context, value, child) => TypingIndicator(
+                typeIndicatorConfig: chatListConfig.typeIndicatorConfig,
+                chatBubbleConfig:
+                    chatListConfig.chatBubbleConfig?.inComingChatBubbleConfig,
+                showIndicator: value,
+              ),
+            ),
+          ),
         SliverToBoxAdapter(
           child: GestureDetector(
             onHorizontalDragUpdate: (details) =>
@@ -169,32 +195,6 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
                     },
                   )
                 : _chatStreamBuilder,
-          ),
-        ),
-        if (chatController != null)
-          SliverToBoxAdapter(
-            child: ValueListenableBuilder(
-              valueListenable: chatController!.typingIndicatorNotifier,
-              builder: (context, value, child) => TypingIndicator(
-                typeIndicatorConfig: chatListConfig.typeIndicatorConfig,
-                chatBubbleConfig:
-                    chatListConfig.chatBubbleConfig?.inComingChatBubbleConfig,
-                showIndicator: value,
-              ),
-            ),
-          ),
-        if (chatController != null)
-          SliverToBoxAdapter(
-            child: Align(
-              alignment: suggestionsListConfig.axisAlignment.alignment,
-              child: const SuggestionList(),
-            ),
-          ),
-        // Adds bottom space to the message list, ensuring it is displayed
-        // above the message text field.
-        SliverToBoxAdapter(
-          child: SizedBox(
-            height: chatTextFieldHeight,
           ),
         ),
       ],
