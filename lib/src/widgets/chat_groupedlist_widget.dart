@@ -144,7 +144,6 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
   Widget build(BuildContext context) {
     final suggestionsListConfig =
         suggestionsConfig?.listConfig ?? const SuggestionListConfig();
-    DateTime lastMatchedDate = DateTime.now();
     return GestureDetector(
       onHorizontalDragUpdate: (details) => isEnableSwipeToSeeTime && !showPopUp
           ? _onHorizontalDrag(details)
@@ -175,10 +174,7 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
 
             if (enableSeparator) {
               /// Get separator when date differ for two messages
-              (messageSeparator, lastMatchedDate) = _getMessageSeparator(
-                messages,
-                lastMatchedDate,
-              );
+              messageSeparator = _getMessageSeparator(messages);
             }
 
             /// [count] that indicates how many separators
@@ -368,12 +364,11 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
         : const SizedBox.shrink();
   }
 
-  GetMessageSeparator _getMessageSeparator(
+  Map<int, DateTime> _getMessageSeparator(
     List<Message> messages,
-    DateTime lastDate,
   ) {
     final messageSeparator = <int, DateTime>{};
-    var lastMatchedDate = lastDate;
+    var lastMatchedDate = DateTime.now();
     var counter = 0;
 
     /// Holds index and separator mapping to display in chat
@@ -401,7 +396,7 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
       }
     }
 
-    return (messageSeparator, lastMatchedDate);
+    return messageSeparator;
   }
 }
 
