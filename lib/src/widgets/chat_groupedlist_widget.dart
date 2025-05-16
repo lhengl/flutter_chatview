@@ -177,9 +177,9 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
               messageSeparator = _getMessageSeparator(messages);
             }
 
-            /// [count] that indicates how many separators
-            /// needs to be display in chat
-            var count = 0;
+            // Precompute separator indexes so we can count how many are before a given index
+            // This allows us to shift message index safely without relying on mutable counters
+            final separatorIndexes = messageSeparator.keys.toList()..sort();
 
             return CustomScrollView(
               reverse: true,
@@ -216,25 +216,24 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
                 SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
-                      /// By removing [count] from [index] will get actual index
-                      /// to display message in chat
-                      var newIndex = index - count;
-
-                      /// Check [messageSeparator] contains group separator for [index]
+                      // If the current index is a separator position, render a date header instead of a message
                       if (enableSeparator &&
                           messageSeparator.containsKey(index)) {
-                        /// Increase counter each time
-                        /// after separating messages with separator
-                        count++;
-                        return _groupSeparator(
-                          messageSeparator[index]!,
-                        );
+                        return _groupSeparator(messageSeparator[index]!);
                       }
+
+                      // Count how many separator widgets come before this index
+                      // This lets us shift the message index safely without range errors
+                      final separatorCount =
+                          separatorIndexes.where((i) => i < index).length;
+
+                      // Adjust the message index by subtracting the number of earlier separators
+                      final newIndex = index - separatorCount;
+                      final message = messages[newIndex];
 
                       return ValueListenableBuilder<String?>(
                         valueListenable: _replyId,
                         builder: (context, state, child) {
-                          final message = messages[newIndex];
                           final enableScrollToRepliedMsg = chatListConfig
                                   .repliedMessageConfig
                                   ?.repliedMsgAutoScrollConfig
