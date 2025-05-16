@@ -144,57 +144,130 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
   Widget build(BuildContext context) {
     final suggestionsListConfig =
         suggestionsConfig?.listConfig ?? const SuggestionListConfig();
-    return SingleChildScrollView(
-      reverse: true,
-      // When reaction popup is being appeared at that user should not scroll.
-      physics: showPopUp ? const NeverScrollableScrollPhysics() : null,
-      controller: widget.scrollController,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GestureDetector(
-            onHorizontalDragUpdate: (details) =>
-                isEnableSwipeToSeeTime && !showPopUp
-                    ? _onHorizontalDrag(details)
-                    : null,
-            onHorizontalDragEnd: (details) =>
-                isEnableSwipeToSeeTime && !showPopUp
-                    ? _animationController?.reverse()
-                    : null,
-            onTap: widget.onChatListTap,
-            child: _animationController != null
-                ? AnimatedBuilder(
-                    animation: _animationController!,
-                    builder: (context, child) {
-                      return _chatStreamBuilder;
-                    },
-                  )
-                : _chatStreamBuilder,
-          ),
-          if (chatController != null)
-            ValueListenableBuilder(
-              valueListenable: chatController!.typingIndicatorNotifier,
-              builder: (context, value, child) => TypingIndicator(
-                typeIndicatorConfig: chatListConfig.typeIndicatorConfig,
-                chatBubbleConfig:
-                    chatListConfig.chatBubbleConfig?.inComingChatBubbleConfig,
-                showIndicator: value,
-              ),
-            ),
-          if (chatController != null)
-            Flexible(
-              child: Align(
-                alignment: suggestionsListConfig.axisAlignment.alignment,
-                child: const SuggestionList(),
-              ),
-            ),
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) => isEnableSwipeToSeeTime && !showPopUp
+          ? _onHorizontalDrag(details)
+          : null,
+      onHorizontalDragEnd: (details) => isEnableSwipeToSeeTime && !showPopUp
+          ? _animationController?.reverse()
+          : null,
+      onTap: widget.onChatListTap,
+      child: StreamBuilder<List<Message>>(
+        stream: chatController?.messageStreamController.stream,
+        builder: (context, snapshot) {
+          if (!snapshot.connectionState.isActive) {
+            return Center(
+              child: chatBackgroundConfig.loadingWidget ??
+                  const CircularProgressIndicator(),
+            );
+          } else {
+            final messages = (chatBackgroundConfig.sortEnable
+                    ? sortMessage(snapshot.data!)
+                    : snapshot.data!)
+                .reversed
+                .toList();
 
-          // Adds bottom space to the message list, ensuring it is displayed
-          // above the message text field.
-          SizedBox(
-            height: chatTextFieldHeight,
-          ),
-        ],
+            final enableSeparator =
+                featureActiveConfig?.enableChatSeparator ?? false;
+
+            Map<int, DateTime> messageSeparator = {};
+
+            if (enableSeparator) {
+              /// Get separator when date differ for two messages
+              messageSeparator = _getMessageSeparator(messages);
+            }
+
+            // Precompute separator indexes so we can count how many are before a given index
+            // This allows us to shift message index safely without relying on mutable counters
+            final separatorIndexes = messageSeparator.keys.toList()..sort();
+
+            return CustomScrollView(
+              reverse: true,
+              // When reaction popup is being appeared at that user should not scroll.
+              physics: showPopUp ? const NeverScrollableScrollPhysics() : null,
+              controller: widget.scrollController,
+              slivers: [
+                // Adds bottom space to the message list, ensuring it is displayed
+                // above the message text field.
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: chatTextFieldHeight,
+                  ),
+                ),
+                if (chatController != null)
+                  SliverToBoxAdapter(
+                    child: Align(
+                      alignment: suggestionsListConfig.axisAlignment.alignment,
+                      child: const SuggestionList(),
+                    ),
+                  ),
+                if (chatController != null)
+                  SliverToBoxAdapter(
+                    child: ValueListenableBuilder(
+                      valueListenable: chatController!.typingIndicatorNotifier,
+                      builder: (context, value, child) => TypingIndicator(
+                        typeIndicatorConfig: chatListConfig.typeIndicatorConfig,
+                        chatBubbleConfig: chatListConfig
+                            .chatBubbleConfig?.inComingChatBubbleConfig,
+                        showIndicator: value,
+                      ),
+                    ),
+                  ),
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      // If the current index is a separator position, render a date header instead of a message
+                      if (enableSeparator &&
+                          messageSeparator.containsKey(index)) {
+                        return _groupSeparator(messageSeparator[index]!);
+                      }
+
+                      // Count how many separator widgets come before this index
+                      // This lets us shift the message index safely without range errors
+                      final separatorCount =
+                          separatorIndexes.where((i) => i < index).length;
+
+                      // Adjust the message index by subtracting the number of earlier separators
+                      final newIndex = index - separatorCount;
+                      final message = messages[newIndex];
+
+                      return ValueListenableBuilder<String?>(
+                        valueListenable: _replyId,
+                        builder: (context, state, child) {
+                          final enableScrollToRepliedMsg = chatListConfig
+                                  .repliedMessageConfig
+                                  ?.repliedMsgAutoScrollConfig
+                                  .enableScrollToRepliedMsg ??
+                              false;
+                          return ChatBubbleWidget(
+                            key: message.key,
+                            message: message,
+                            slideAnimation: _slideAnimation,
+                            onLongPress: (yCoordinate, xCoordinate) =>
+                                widget.onChatBubbleLongPress(
+                              yCoordinate,
+                              xCoordinate,
+                              message,
+                            ),
+                            onSwipe: widget.assignReplyMessage,
+                            shouldHighlight: state == message.id,
+                            onReplyTap: enableScrollToRepliedMsg
+                                ? (replyId) =>
+                                    _onReplyTap(replyId, snapshot.data)
+                                : null,
+                          );
+                        },
+                      );
+                    },
+                    childCount: (enableSeparator
+                        ? messages.length + messageSeparator.length
+                        : messages.length),
+                  ),
+                ),
+              ],
+            );
+          }
+        },
       ),
     );
   }
@@ -250,95 +323,6 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
     super.dispose();
   }
 
-  Widget get _chatStreamBuilder {
-    DateTime lastMatchedDate = DateTime.now();
-    return StreamBuilder<List<Message>>(
-      stream: chatController?.messageStreamController.stream,
-      builder: (context, snapshot) {
-        if (!snapshot.connectionState.isActive) {
-          return Center(
-            child: chatBackgroundConfig.loadingWidget ??
-                const CircularProgressIndicator(),
-          );
-        } else {
-          final messages = chatBackgroundConfig.sortEnable
-              ? sortMessage(snapshot.data!)
-              : snapshot.data!;
-
-          final enableSeparator =
-              featureActiveConfig?.enableChatSeparator ?? false;
-
-          Map<int, DateTime> messageSeparator = {};
-
-          if (enableSeparator) {
-            /// Get separator when date differ for two messages
-            (messageSeparator, lastMatchedDate) = _getMessageSeparator(
-              messages,
-              lastMatchedDate,
-            );
-          }
-
-          /// [count] that indicates how many separators
-          /// needs to be display in chat
-          var count = 0;
-
-          return ListView.builder(
-            key: widget.key,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
-            shrinkWrap: true,
-            itemCount: (enableSeparator
-                ? messages.length + messageSeparator.length
-                : messages.length),
-            itemBuilder: (context, index) {
-              /// By removing [count] from [index] will get actual index
-              /// to display message in chat
-              var newIndex = index - count;
-
-              /// Check [messageSeparator] contains group separator for [index]
-              if (enableSeparator && messageSeparator.containsKey(index)) {
-                /// Increase counter each time
-                /// after separating messages with separator
-                count++;
-                return _groupSeparator(
-                  messageSeparator[index]!,
-                );
-              }
-
-              return ValueListenableBuilder<String?>(
-                valueListenable: _replyId,
-                builder: (context, state, child) {
-                  final message = messages[newIndex];
-                  final enableScrollToRepliedMsg = chatListConfig
-                          .repliedMessageConfig
-                          ?.repliedMsgAutoScrollConfig
-                          .enableScrollToRepliedMsg ??
-                      false;
-                  return ChatBubbleWidget(
-                    key: message.key,
-                    message: message,
-                    slideAnimation: _slideAnimation,
-                    onLongPress: (yCoordinate, xCoordinate) =>
-                        widget.onChatBubbleLongPress(
-                      yCoordinate,
-                      xCoordinate,
-                      message,
-                    ),
-                    onSwipe: widget.assignReplyMessage,
-                    shouldHighlight: state == message.id,
-                    onReplyTap: enableScrollToRepliedMsg
-                        ? (replyId) => _onReplyTap(replyId, snapshot.data)
-                        : null,
-                  );
-                },
-              );
-            },
-          );
-        }
-      },
-    );
-  }
-
   List<Message> sortMessage(List<Message> messages) {
     final elements = [...messages];
     elements.sort(
@@ -379,40 +363,43 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
         : const SizedBox.shrink();
   }
 
-  GetMessageSeparator _getMessageSeparator(
-    List<Message> messages,
-    DateTime lastDate,
-  ) {
+  /// Example:
+  /// Input: messages = [msg(D3), msg(D3), msg(D2), msg(D2), msg(D1), msg(D1)]
+  /// Output: separator at index:
+  ///   i + 1 = 2 → D3 ends
+  ///   i + 1 = 4 → D2 ends
+  ///   i + 1 = 6 → D1 ends (end of list)
+  /// Which results in:
+  ///   [D3, D3, separator(D3), D2, D2, separator(D2), D1, D1, separator(D1)]
+  Map<int, DateTime> _getMessageSeparator(List<Message> messages) {
     final messageSeparator = <int, DateTime>{};
-    var lastMatchedDate = lastDate;
-    var counter = 0;
+    DateTime? lastGroupDate;
 
-    /// Holds index and separator mapping to display in chat
+    // The message list is expected to be reversed:
+    // [Date3, Date3, Date2, Date2, Date1, Date1]
+    // So we want to insert separators AFTER each group.
+    // That means the last message in each group should trigger the separator (since the list is descending).
+
     for (var i = 0; i < messages.length; i++) {
-      if (messageSeparator.isEmpty) {
-        /// Separator for initial message
-        messageSeparator[0] = messages[0].createdAt;
-        continue;
-      }
-      lastMatchedDate = _groupBy(
-        messages[i],
-        lastMatchedDate,
-      );
-      var previousDate = _groupBy(
-        messages[i - 1],
-        lastMatchedDate,
-      );
+      final currentGroupDate =
+          _groupBy(messages[i], lastGroupDate ?? messages[i].createdAt);
 
-      if (previousDate != lastMatchedDate) {
-        /// Group separator when previous message and
-        /// current message time differ
-        counter++;
+      // Only insert a separator *after* the last message in a group (which comes earlier in reversed list)
+      final isLastMessage = i == messages.length - 1;
+      final nextGroupDate =
+          isLastMessage ? null : _groupBy(messages[i + 1], currentGroupDate);
 
-        messageSeparator[i + counter] = messages[i].createdAt;
+      if (isLastMessage || currentGroupDate != nextGroupDate) {
+        // Justification:
+        // If the next message belongs to a different date group, then this is the last message of the current group.
+        // Insert the separator AFTER this message (i.e. at i + 1).
+        messageSeparator[i + 1] = currentGroupDate;
       }
+
+      lastGroupDate = currentGroupDate;
     }
 
-    return (messageSeparator, lastMatchedDate);
+    return messageSeparator;
   }
 }
 
