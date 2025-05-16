@@ -364,36 +364,40 @@ class _ChatGroupedListWidgetState extends State<ChatGroupedListWidget>
         : const SizedBox.shrink();
   }
 
-  Map<int, DateTime> _getMessageSeparator(
-    List<Message> messages,
-  ) {
+  /// Example:
+  /// Input: messages = [msg(D3), msg(D3), msg(D2), msg(D2), msg(D1), msg(D1)]
+  /// Output: separator at index:
+  ///   i + 1 = 2 → D3 ends
+  ///   i + 1 = 4 → D2 ends
+  ///   i + 1 = 6 → D1 ends (end of list)
+  /// Which results in:
+  ///   [D3, D3, separator(D3), D2, D2, separator(D2), D1, D1, separator(D1)]
+  Map<int, DateTime> _getMessageSeparator(List<Message> messages) {
     final messageSeparator = <int, DateTime>{};
-    var lastMatchedDate = DateTime.now();
-    var counter = 0;
+    DateTime? lastGroupDate;
 
-    /// Holds index and separator mapping to display in chat
+    // The message list is expected to be reversed:
+    // [Date3, Date3, Date2, Date2, Date1, Date1]
+    // So we want to insert separators AFTER each group.
+    // That means the last message in each group should trigger the separator (since the list is descending).
+
     for (var i = 0; i < messages.length; i++) {
-      if (messageSeparator.isEmpty) {
-        /// Separator for initial message
-        messageSeparator[0] = messages[0].createdAt;
-        continue;
-      }
-      lastMatchedDate = _groupBy(
-        messages[i],
-        lastMatchedDate,
-      );
-      var previousDate = _groupBy(
-        messages[i - 1],
-        lastMatchedDate,
-      );
+      final currentGroupDate =
+          _groupBy(messages[i], lastGroupDate ?? messages[i].createdAt);
 
-      if (previousDate != lastMatchedDate) {
-        /// Group separator when previous message and
-        /// current message time differ
-        counter++;
+      // Only insert a separator *after* the last message in a group (which comes earlier in reversed list)
+      final isLastMessage = i == messages.length - 1;
+      final nextGroupDate =
+          isLastMessage ? null : _groupBy(messages[i + 1], currentGroupDate);
 
-        messageSeparator[i + counter] = messages[i].createdAt;
+      if (isLastMessage || currentGroupDate != nextGroupDate) {
+        // Justification:
+        // If the next message belongs to a different date group, then this is the last message of the current group.
+        // Insert the separator AFTER this message (i.e. at i + 1).
+        messageSeparator[i + 1] = currentGroupDate;
       }
+
+      lastGroupDate = currentGroupDate;
     }
 
     return messageSeparator;
